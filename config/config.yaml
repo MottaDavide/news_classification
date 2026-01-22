@@ -1,0 +1,13 @@
+# Label names for retrieve the correct news category
+LABEL_NAMES:
+- 0: 'International News'
+  1: 'Business'
+  2: 'Technology'
+  3: 'Entertainment'
+  4: 'Sports'
+  5: 'General News'
+  6: 'Health'
+
+# Random seed for reproducibility
+RANDOM_STATE: 42
+
