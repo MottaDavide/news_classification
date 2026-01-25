@@ -8,6 +8,7 @@ from collections import Counter
 from sklearn.base import BaseEstimator, TransformerMixin # I need BaseEstimators cause it has get_params and set_params methods useful for tuning
 from sklearn.pipeline import Pipeline
 from dataclasses import dataclass
+from category_encoders.catboost import CatBoostEncoder
 
 
 
@@ -74,6 +75,12 @@ def preprocessing_data(df: pd.DataFrame) -> pd.DataFrame:
     grouped = temp_df.groupby(by = ['source','title','article'], as_index=False)['label'].agg({'nunique'})
     index = grouped[grouped['nunique'] >= 2].sort_values(by='nunique', ascending=False).index
     temp_df = temp_df.iloc[~temp_df.index.isin(index)]
+    
+    
+    # Dropping id column
+    print("Dropping id column...")
+    if 'id' in temp_df.columns:
+        temp_df = temp_df.drop(columns=['Id'])
     
     print(f"  Preprocessed Data: {temp_df.shape[0]:,} samples, {temp_df.shape[1]} features")
     
@@ -306,8 +313,10 @@ def top_feature_by_category(df: pd.DataFrame, top_n: int = 5, feature: str = "ti
     elif feature == "first_link_domain":
         if 'first_link_domain' not in df.columns:
             df = apply_domain_extraction(df)
+    elif feature == 'source':
+        pass
     else:
-        raise ValueError("Feature must be one of ['title_suffix', 'first_link_domain']")
+        raise ValueError("Feature must be one of ['title_suffix', 'first_link_domain', 'source']")
     
     matrix = df.groupby(['label', f'{feature}']).size().unstack(fill_value=0)
     relative_matrix = (matrix / matrix.sum(axis=0))
@@ -359,6 +368,17 @@ def add_is_label_feature_columns(
     """
     
     df = df.copy()
+    
+    if feature == "title_suffix":
+        if 'title_suffix' not in df.columns:
+            df = apply_title_extraction(df)
+    elif feature == "first_link_domain":
+        if 'first_link_domain' not in df.columns:
+            df = apply_domain_extraction(df)
+    elif feature == 'source':
+        pass
+    else:
+        raise ValueError("Feature must be one of ['title_suffix', 'first_link_domain, 'source]")
     
     
 
@@ -414,8 +434,90 @@ class TopFeatureTransformer(BaseEstimator, TransformerMixin):
             feature=self.feature,
             keep_column=self.keep_column
         )
-    
 
+
+@dataclass
+class TextEncoder(BaseEstimator, TransformerMixin):
+    
+    cols: Union[List[str], Tuple[str], str] = field(default_factory=lambda: ['source'])
+    encoder: str = 'catboost' #target
+    binary: bool = False
+    sigma: float | None = None
+    drop_original: bool = True
+    
+    
+    def __post_init__(self):
+        self._encoders = {}
+        self._classes = None
+        if isinstance(self.cols, str):
+            self.cols = [self.cols]
+        else:
+            self.cols = list(self.cols)
+            
+    def _clean_input(self, X: pd.DataFrame) -> pd.DataFrame:
+        return X[self.cols].fillna("missing")
+    
+    def fit(self, X, y):
+        if y is None:
+            raise ValueError("y cannot be None for target encoding")
+
+        self._classes = np.unique(y)
+        X_cleaned = self._clean_input(X)
+        
+        
+        for cls in self._classes:
+            y_binary = (y == cls).astype(int)
+            CBE = CatBoostEncoder(cols=self.cols, sigma=self.sigma, verbose = 1, return_df=True)
+            CBE.fit(X_cleaned, y_binary)
+            self._encoders[cls] = CBE
+            
+        return self
+    
+    
+    def transform(self, X):
+        X_out = X.copy()
+        X_cleaned = self._clean_input(X)
+
+        for cls, enc in self._encoders.items():
+            encoded_cols = enc.transform(X_cleaned)
+            encoded_cols.index = X.index
+            
+            new_names = {col: f"{col}_prob_cl_{cls}" for col in self.cols}
+            encoded_cols = encoded_cols.rename(columns=new_names)
+            X_out = pd.concat([X_out, encoded_cols], axis=1)
+            
+        if self.drop_original:
+            X_out = X_out.drop(columns=self.cols)
+            
+        return X_out
+
+    def fit_transform(self, X: pd.DataFrame, y: pd.Series = None, **fit_params) -> pd.DataFrame:
+
+        if y is None:
+            raise ValueError("y cannot be None for target encoding")
+            
+        self._classes = np.unique(y)
+        X_out = X.copy()
+        X_cleaned = self._clean_input(X)
+        
+        for cls in self._classes:
+            y_binary = (y == cls).astype(int)
+            CBE = CatBoostEncoder(cols=self.cols, sigma=self.sigma, verbose = 1, return_df=True)
+            
+            # fit_transform di CatBoostEncoder attiva la logica sequenziale (low -> high)
+            encoded_cols = CBE.fit_transform(X_cleaned, y_binary)
+            encoded_cols.index = X.index
+            
+            self._encoders[cls] = CBE
+            
+            new_names = {col: f"{col}_prob_cl_{cls}" for col in self.cols}
+            encoded_cols = encoded_cols.rename(columns=new_names)
+            X_out = pd.concat([X_out, encoded_cols], axis=1)
+            
+        if self.drop_original:
+            X_out = X_out.drop(columns=self.cols)
+            
+        return X_out 
         
     
     
