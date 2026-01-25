@@ -1,1 +1,3 @@
 venv/*
+ds_venv/*
+.claude/*

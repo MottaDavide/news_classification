@@ -1,6 +1,6 @@
 # Label names for retrieve the correct news category
 LABEL_NAMES:
-- 0: 'International News'
+  0: 'International News'
   1: 'Business'
   2: 'Technology'
   3: 'Entertainment'
@@ -10,4 +10,28 @@ LABEL_NAMES:
 
 # Random seed for reproducibility
 RANDOM_STATE: 42
+
+
+FEATURES:
+  EXTRACT_TITLE_SUFFIX: True
+  EXTRACT_DOMAIN: True
+  EXTRACT_LINKS: True
+  CYCLE_TIME: True
+
+TFIDF:
+  ENABLE: True
+  PARAMS:
+    max_features:  15000
+    ngram_range:  (1, 2)
+    min_df:  5
+    max_df:  0.7
+    token_pattern:  r'(?u)\b[a-zA-Z]{3,}\b'
+    stop_words:  'english'
+    sublinear_tf:  True
+
+CATBOOST:
+  ENABLE: True
+  PARAMS:
+    sigma: 0
+
 
