@@ -1,0 +1,4 @@
+{
+  "C": 0.05,
+  "loss": "squared_hinge"
+}

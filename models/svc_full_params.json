@@ -1,0 +1,6 @@
+{
+  "C": 0.1,
+  "loss": "squared_hinge",
+  "max_iter": 2000,
+  "class_weight": "balanced"
+}
