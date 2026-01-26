@@ -51,7 +51,7 @@ np.random.seed(42)
 with open("config/config.yaml", 'r') as ymlfile:
     config = yaml.safe_load(ymlfile)
     
-LABEL_NAMES = config['LABEL_NAMES'][0]
+LABEL_NAMES = config['LABEL_NAMES']
 
 RANDOM_STATE = config['RANDOM_STATE']
 
@@ -296,6 +296,237 @@ def count_links(article: str) -> Dict[str, int]:
     
     return counts
 
+RSS_TO_LABEL = {
+    # International (label 0)
+    'world': 0,
+    'europe': 0,
+    'politics': 0,
+    'elections': 0,
+    'us': 0,
+    
+    # Business (label 1)
+    'business': 1,
+    
+    # Technology (label 2)
+    'tech': 2,
+    'science': 2,
+    
+    # Entertainment (label 3)
+    'entertainment': 3,
+    
+    # Sports (label 4)
+    'sports': 4,
+    
+    # General (label 5)
+    'cnn_topstories': 5,
+    
+    # Health (label 6)
+    'health': 6,
+}
+
+
+
+# =============================================================================
+# FUNZIONI DI ESTRAZIONE
+# =============================================================================
+
+def extract_rss_label(text):
+    """
+    Estrae la label predetta dalla categoria RSS presente nel testo.
+    
+    Questa feature ha 100% di accuratezza ma copre solo ~9% degli articoli.
+    
+    Parameters
+    ----------
+    text : str
+        Testo dell'articolo (colonna 'article')
+    
+    Returns
+    -------
+    int or None
+        Label predetta (0-6) se trova RSS category, None altrimenti
+    """
+    if pd.isna(text) or not isinstance(text, str):
+        return None
+    
+    # Pattern per estrarre la categoria RSS
+    match = re.search(r'/rss/([a-z_]+)', text.lower())
+    if match:
+        category = match.group(1).split('?')[0]  # Rimuovi query string
+        return RSS_TO_LABEL.get(category, None)
+    return None
+
+
+def extract_all_links(text):
+    """
+    Estrae tutti i link da un testo, inclusi quelli annidati (separati da *).
+    
+    Gestisce:
+    1. Link standard http/https
+    2. Link dopo href= o src=
+    3. Link annidati separati da *
+    
+    Parameters
+    ----------
+    text : str
+        Testo dell'articolo
+    
+    Returns
+    -------
+    list
+        Lista di URL estratti
+    """
+    if pd.isna(text) or not isinstance(text, str):
+        return []
+    
+    links = []
+    
+    # Pattern 1: Link standard http/https
+    for match in re.findall(r'https?://[^\s<>"\')\]]+', text, re.IGNORECASE):
+        links.append(match)
+    
+    # Pattern 2: href="..." o src="..."
+    for match in re.findall(r'(?:href|src)=["\']([^"\']+)["\']', text, re.IGNORECASE):
+        if 'http' in match.lower():
+            links.append(match)
+    
+    # Separa link annidati (separati da *)
+    all_links = []
+    for link in links:
+        if '*http' in link:
+            parts = link.split('*http')
+            all_links.append(parts[0])
+            for part in parts[1:]:
+                all_links.append('http' + part)
+        else:
+            all_links.append(link)
+    
+    return all_links
+
+
+def extract_link_info(url):
+    """
+    Estrae informazioni strutturate da un URL.
+    
+    Parameters
+    ----------
+    url : str
+        URL da analizzare
+    
+    Returns
+    -------
+    dict
+        Dizionario con: domain, domain_main, path, path_parts, query
+    """
+    try:
+        # Pulisci URL
+        url = re.sub(r'[<>"\')\]\s]+$', '', url)
+        parsed = urlparse(url)
+        
+        domain = parsed.netloc.split(':')[0] if parsed.netloc else ''
+        domain_parts = domain.split('.')
+        domain_main = '.'.join(domain_parts[-2:]) if len(domain_parts) >= 2 else domain
+        
+        return {
+            'full_url': url,
+            'domain': domain,
+            'domain_main': domain_main,
+            'path': parsed.path,
+            'path_parts': [p for p in parsed.path.split('/') if p],
+            'query': parsed.query
+        }
+    except:
+        return None
+
+
+def extract_link_features(text):
+    """
+    Estrae tutte le feature derivate dai link per un articolo.
+    
+    Parameters
+    ----------
+    text : str
+        Testo dell'articolo
+    
+    Returns
+    -------
+    dict
+        Dizionario con:
+        - rss_label: label predetta da RSS (o None)
+        - has_links: bool
+        - num_links: int
+        - has_yahoo_link: bool
+        - has_reuters_link: bool
+        - has_cnn_link: bool
+        - has_img: bool
+        - main_domain: dominio principale (o None)
+    """
+    features = {
+        'rss_label': None,
+        'has_links': False,
+        'num_links': 0,
+        'has_yahoo_link': False,
+        'has_reuters_link': False,
+        'has_cnn_link': False,
+        'has_img': False,
+        'main_domain': None
+    }
+    
+    if pd.isna(text) or not isinstance(text, str):
+        return features
+    
+    text_lower = text.lower()
+    
+    # Feature principale: RSS label
+    features['rss_label'] = extract_rss_label(text)
+    
+    # Estrai link
+    links = extract_all_links(text)
+    features['has_links'] = len(links) > 0
+    features['num_links'] = len(links)
+    
+    # Presenza di specifici domini
+    features['has_yahoo_link'] = 'yahoo.com' in text_lower
+    features['has_reuters_link'] = 'reuters.com' in text_lower
+    features['has_cnn_link'] = 'cnn.com' in text_lower
+    features['has_img'] = '<img' in text_lower
+    
+    # Dominio principale (primo link)
+    if links:
+        info = extract_link_info(links[0])
+        if info:
+            features['main_domain'] = info['domain_main']
+    
+    return features
+
+
+def add_link_features(df, article_col='article'):
+    """
+    Aggiunge le feature estratte dai link a un DataFrame.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame con gli articoli
+    article_col : str
+        Nome della colonna con il testo degli articoli
+    
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame con le nuove colonne di feature
+    """
+    # Estrai feature per ogni articolo
+    link_features = df[article_col].apply(extract_link_features)
+    
+    # Espandi in colonne separate
+    features_df = pd.DataFrame(link_features.tolist())
+    
+    # Aggiungi al DataFrame originale
+    result = pd.concat([df, features_df], axis=1)
+    
+    return result
+
 
 
 def generate_features(
@@ -317,6 +548,9 @@ def generate_features(
     # Domain
     if config['FEATURES']['EXTRACT_DOMAIN']:
         temp_df['first_link_domain'] = temp_df['article'].apply(extract_first_domain)
+        
+    if config['FEATURES']['LINKS_FEATURES']:
+        temp_df = add_link_features(temp_df, 'article')
     
     # Link counts
     if config['FEATURES']['EXTRACT_LINKS']:
@@ -351,7 +585,7 @@ class FullPipeline(BaseEstimator, TransformerMixin):
         self.scaler = None
         self.feature_names_ = None
         self.num_cols_complete = [
-        'page_rank', 'n_links', 'n_images', 'n_ads', 'n_feeds', 'article_length']
+        'page_rank', 'n_links', 'n_images', 'n_ads', 'n_feeds', 'article_length', 'rss_label','num_links']
         self.cat_cols_complete = ['source', 'first_link_domain', 'title_suffix']
         
     
@@ -363,8 +597,20 @@ class FullPipeline(BaseEstimator, TransformerMixin):
         # 1. TF-IDF
         if self.config['TFIDF']['ENABLE']:
             tfidf_params = self.config['TFIDF']['PARAMS']
-            tfidf_params['ngram_range'] = ast.literal_eval(self.config['TFIDF']['PARAMS']['ngram_range'])
-            tfidf_params['token_pattern'] = ast.literal_eval(self.config['TFIDF']['PARAMS']['token_pattern'])
+            ng = self.config['TFIDF']['PARAMS'].get('ngram_range')
+            if isinstance(ng, str):
+                ng = ast.literal_eval(ng)
+            if isinstance(ng, list):
+                ng = tuple(ng)
+            tfidf_params['ngram_range'] = ng
+            
+
+            
+            try:
+                tfidf_params['token_pattern'] = ast.literal_eval(self.config['TFIDF']['PARAMS']['token_pattern'])
+            except:
+                tfidf_params['token_pattern']  = r'(?u)\b[a-zA-Z]{3,}\b'
+            
             self.tfidf = TfidfVectorizer(**tfidf_params)
             X_tfidf = self.tfidf.fit_transform(X['combined_text'])
             features_list.append(X_tfidf)
@@ -722,7 +968,7 @@ def plot_cv_tuning(results_df, param_name, model_name, save_path=None):
     fig, ax = plt.subplots(figsize=(10, 5))
     
     results_df = results_df.copy()
-    results_df['param_val'] = results_df['params'].apply(lambda x: x.get(param_name))
+    results_df['param_val'] = results_df['params'].apply(lambda x: x[param_name])
     results_df = results_df.dropna(subset=['param_val'])
     
     grouped = results_df.groupby('param_val').agg({
