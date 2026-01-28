@@ -8,8 +8,26 @@ LABEL_NAMES:
   5: 'General News'
   6: 'Health'
 
+RSS_TO_LABEL:
+    'world': 0
+    'europe': 0
+    'politics': 0
+    'elections': 0
+    'us': 0
+    'business': 1
+    'tech': 2
+    'science': 2
+    'entertainment': 3
+    'sports': 4
+    'cnn_topstories': 5
+    'health': 6
+
 # Random seed for reproducibility
 RANDOM_STATE: 42
+
+CONTEXT_INJECTION: True
+
+USE_CATBOOST: True
 
 
 FEATURES:
@@ -23,7 +41,7 @@ TFIDF:
   ENABLE: True
   PARAMS:
     max_features:  15000
-    ngram_range:  (1, 2)
+    ngram_range:  (12)
     min_df:  5
     max_df:  0.7
     token_pattern:  r'(?u)\b[a-zA-Z]{3,}\b'
