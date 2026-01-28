@@ -599,8 +599,8 @@ def train_and_evaluate(
         # Optimized defaults for context injection
         if model_type == 'svc':
             model = LinearSVC(
-                C=0.05, loss='squared_hinge', class_weight='balanced',
-                dual=False, max_iter=2000, random_state=RANDOM_STATE
+                C=0.05, loss='squared_hinge', class_weight='balanced', 
+                dual=True, max_iter=2000, random_state=RANDOM_STATE
             )
             best_params = {'C': 0.05, 'loss': 'squared_hinge'}
         else:
@@ -701,6 +701,9 @@ def train_full_and_predict(
                 'random_state': RANDOM_STATE, 'verbose': -1
             }
             model = lgb.LGBMClassifier(**params)
+    else:
+        params = model.get_params()
+        print(f"Fitting with the following params: {params}")
     
     model.fit(X_train_transformed, y_train)
     

@@ -69,7 +69,7 @@ if __name__ == "__main__":
         save_dir='./models'
     )
     
-    """
+    
     # Generate submission
     submission = train_full_and_predict(
         dev_df,
@@ -81,5 +81,5 @@ if __name__ == "__main__":
         use_catboost=USE_CATBOOST,
         submission_path='submission.csv'
     )
-    """
+    
     
