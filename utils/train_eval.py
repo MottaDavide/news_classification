@@ -20,7 +20,7 @@ from sklearn.metrics import (
     f1_score, confusion_matrix,
     precision_recall_fscore_support, make_scorer
 )
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, RobustScaler
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.base import BaseEstimator, TransformerMixin
 
@@ -56,11 +56,20 @@ CONTEXT_INJECTION= config['CONTEXT_INJECTION']
 
 USE_CATBOOST= config['USE_CATBOOST']
 
+TFIDF_PARMAS = config['TFIDF_PARMAS']
+TFIDF_PARMAS['ngram_range'] = eval(TFIDF_PARMAS['ngram_range'])
+TFIDF_PARMAS['token_pattern'] = eval(TFIDF_PARMAS['token_pattern'])
+
+
+CATBOOST_PARAMS = config['CATBOOST_PARAMS']
+
+np.random.seed(RANDOM_STATE)
+
 
 
 class NewsPipeline(BaseEstimator, TransformerMixin):
     """
-    Complete feature engineering pipeline for news classification.
+    Pipeline to create the final dataframe.
     
     Combines:
     - TF-IDF vectorization of combined text
@@ -82,9 +91,9 @@ class NewsPipeline(BaseEstimator, TransformerMixin):
     
     def __init__(
         self,
-        tfidf_params: Optional[Dict] = None,
-        catboost_sigma: float = 0.5,
-        use_catboost: bool = True,
+        tfidf_params: Optional[Dict] = TFIDF_PARMAS,
+        catboost_sigma: float = CATBOOST_PARAMS['sigma'],
+        use_catboost: bool = USE_CATBOOST,
         use_cyclic_time: bool = True
     ):
         # Optimized TF-IDF params for context injection
@@ -94,6 +103,7 @@ class NewsPipeline(BaseEstimator, TransformerMixin):
             'min_df': 5,
             'max_df': 0.9,
             'sublinear_tf': True,
+            'stop_words': 'english',
             'token_pattern': r'(?u)\b[a-zA-Z]{3,}\b'
         }
         self.catboost_sigma = catboost_sigma
@@ -108,9 +118,8 @@ class NewsPipeline(BaseEstimator, TransformerMixin):
         self.feature_names_ = None
         
         # Column definitions
-        self.num_cols_ = ['page_rank', 'n_links', 'n_images', 'n_ads', 'n_feeds', 
-                        'article_length', 'rss_label']
-        self.cat_cols_ = ['source', 'first_link_domain', 'title_suffix']
+        self.num_cols_ = ['page_rank', 'n_links', 'n_images', 'n_ads', 'n_feeds', 'article_length']
+        self.cat_cols_ = ['source', 'first_link_domain', 'title_suffix', 'rss_label']
     
     def fit(self, X: pd.DataFrame, y: np.ndarray) -> 'NewsPipeline':
         """Fit the pipeline."""
@@ -134,7 +143,7 @@ class NewsPipeline(BaseEstimator, TransformerMixin):
         num_cols = [c for c in self.num_cols_ if c in X.columns]
         if num_cols:
             print("Fitting numerical scaler...")
-            self.scaler_ = StandardScaler()
+            self.scaler_ = RobustScaler()
             X_num = self.scaler_.fit_transform(X[num_cols].fillna(0))
             features_list.append(csr_matrix(X_num))
             feature_names.extend([f"num_{c}" for c in num_cols])
@@ -251,7 +260,8 @@ def tune_linear_svc(
         'C': [0.01, 0.02, 0.05, 0.1, 0.2],
         'loss': ['hinge', 'squared_hinge'],
         'class_weight': ['balanced'],
-        'max_iter': [2000]
+        'max_iter': [2000, 1000, 3000],
+        'dual': [False, True]
     }
     
     svc = LinearSVC(dual=False, random_state=RANDOM_STATE)
@@ -519,7 +529,7 @@ def train_and_evaluate(
     model_type: str = 'svc',
     tune: bool = True,
     context_injection: bool = True,
-    use_catboost: bool = True,
+    use_catboost: bool = USE_CATBOOST,
     save_dir: Optional[str] = None
 ) -> Tuple[Any, NewsPipeline, Dict]:
     """
@@ -573,10 +583,7 @@ def train_and_evaluate(
     
     # Fit pipeline
     print("\n4. Fitting feature pipeline...")
-    pipeline = NewsPipeline(
-        catboost_sigma=0.5,
-        use_catboost=use_catboost
-    )
+    pipeline = NewsPipeline(use_catboost=use_catboost)
     X_train_transformed = pipeline.fit_transform(X_train, y_train)
     X_test_transformed = pipeline.transform(X_test)
     
@@ -587,6 +594,7 @@ def train_and_evaluate(
             model, best_params, _ = tune_linear_svc(X_train_transformed, y_train)
         else:
             model, best_params, _ = tune_lightgbm(X_train_transformed, y_train)
+        print('best params for {model_type}: ', best_params)
     else:
         # Optimized defaults for context injection
         if model_type == 'svc':
@@ -635,7 +643,9 @@ def train_full_and_predict(
     model_type: str = 'svc',
     model_params: Optional[Dict] = None,
     context_injection: bool = True,
-    use_catboost: bool = True,
+    use_catboost: bool = USE_CATBOOST,
+    pipeline: Optional[NewsPipeline] = None,
+    model: Optional[Any] = None,
     save_dir: Optional[str] = None,
     submission_path: str = 'submission.csv'
 ) -> pd.DataFrame:
@@ -662,11 +672,11 @@ def train_full_and_predict(
     
     # Fit pipeline
     print("\n3. Fitting feature pipeline...")
-    pipeline = NewsPipeline(
-        catboost_sigma=0.5,
-        use_catboost=use_catboost
-    )
-    X_train_transformed = pipeline.fit_transform(X_train, y_train)
+    if not pipeline:
+        pipeline = NewsPipeline(use_catboost=use_catboost)
+        X_train_transformed = pipeline.fit_transform(X_train, y_train)
+    else:
+        X_train_transformed = pipeline.transform(X_train)
     
     # Prepare evaluation data
     print("\n4. Preparing evaluation data...")
@@ -676,20 +686,21 @@ def train_full_and_predict(
     
     # Train model
     print("\n5. Training model...")
-    if model_type == 'svc':
-        params = model_params or {
-            'C': 0.05, 'loss': 'squared_hinge', 'class_weight': 'balanced',
-            'dual': False, 'max_iter': 2000, 'random_state': RANDOM_STATE
-        }
-        model = LinearSVC(**params)
-    else:
-        params = model_params or {
-            'n_estimators': 500, 'max_depth': 7, 'learning_rate': 0.05,
-            'num_leaves': 31, 'min_child_samples': 50, 'subsample': 0.7,
-            'colsample_bytree': 0.6, 'class_weight': 'balanced',
-            'random_state': RANDOM_STATE, 'verbose': -1
-        }
-        model = lgb.LGBMClassifier(**params)
+    if not model:
+        if model_type == 'svc':
+            params = model_params or {
+                'C': 0.05, 'loss': 'squared_hinge', 'class_weight': 'balanced',
+                'dual': False, 'max_iter': 2000, 'random_state': RANDOM_STATE
+            }
+            model = LinearSVC(**params)
+        else:
+            params = model_params or {
+                'n_estimators': 500, 'max_depth': 7, 'learning_rate': 0.05,
+                'num_leaves': 31, 'min_child_samples': 50, 'subsample': 0.7,
+                'colsample_bytree': 0.6, 'class_weight': 'balanced',
+                'random_state': RANDOM_STATE, 'verbose': -1
+            }
+            model = lgb.LGBMClassifier(**params)
     
     model.fit(X_train_transformed, y_train)
     
@@ -706,7 +717,7 @@ def train_full_and_predict(
     })
     
     submission.to_csv(submission_path, index=False)
-    print(f"\n✅ Submission saved: {submission_path}")
+    print(f"\n Submission saved: {submission_path}")
     print(f"   Shape: {submission.shape}")
     print(f"\nPrediction distribution:")
     for label, name in LABEL_NAMES.items():
@@ -718,4 +729,4 @@ def train_full_and_predict(
     if save_dir:
         save_model(model, pipeline, params, save_dir, model_name=f"{model_type}_full")
     
-    return submission
+    return submission, model, pipeline

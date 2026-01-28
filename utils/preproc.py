@@ -30,6 +30,8 @@ RSS_TO_LABEL = config['RSS_TO_LABEL']
 
 RANDOM_STATE = config['RANDOM_STATE']
 
+np.random.seed(RANDOM_STATE)
+
 
 def load_data(
     dev_path: str | Path,

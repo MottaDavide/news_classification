@@ -23,6 +23,8 @@ CONTEXT_INJECTION= config['CONTEXT_INJECTION']
 
 USE_CATBOOST= config['USE_CATBOOST']
 
+np.random.seed(RANDOM_STATE)
+
 warnings.filterwarnings('ignore')
 
 def clean_text(text: str) -> str:
@@ -139,6 +141,12 @@ def generate_features(
     pd.DataFrame
         DataFrame with additional feature columns.
     """
+    print(" Weights:")
+    print(f"  Source weight: {source_weight}")
+    print(f"  RSS weight: {rss_weight}")
+    print(f"  Title weight: {title_weight}")
+    print(f"  Article weight: {article_weight}")
+    
     temp_df = df.copy()
     
     # Clean text columns
