@@ -7,25 +7,51 @@ import re
 
 import yaml as yml
 
+import nltk                                                
+from nltk.stem import WordNetLemmatizer                    
+from nltk.corpus import wordnet   
+nltk.download('wordnet')                                 
+nltk.download('averaged_perceptron_tagger') 
 
 with open('config/config.yaml', 'r') as f:
     config = yml.safe_load(f)
     
 
 
-LABEL_NAMES = config['LABEL_NAMES']
 
 RSS_TO_LABEL = config['RSS_TO_LABEL']
 
 RANDOM_STATE = config['RANDOM_STATE']
 
-CONTEXT_INJECTION= config['CONTEXT_INJECTION']
 
-USE_CATBOOST= config['USE_CATBOOST']
 
 np.random.seed(RANDOM_STATE)
 
 warnings.filterwarnings('ignore')
+
+lemmatizer = WordNetLemmatizer()
+                                         
+def get_wordnet_pos(tag):                                                       
+    if tag.startswith('J'):                                
+        return wordnet.ADJ                                 
+    elif tag.startswith('V'):                              
+        return wordnet.VERB                                
+    elif tag.startswith('N'):                              
+        return wordnet.NOUN                                
+    elif tag.startswith('R'):                              
+        return wordnet.ADV                                 
+    return wordnet.NOUN 
+
+def lemmatize_text(text):                                  
+    """Lemmatize text with POS tagging."""                 
+    if not text:                                           
+        return ""                                          
+    words = text.split()                                   
+    pos_tags = nltk.pos_tag(words)                         
+    lemmas = [lemmatizer.lemmatize(word, get_wordnet_pos(tag))                                      
+            for word, tag in pos_tags]                   
+    return ' '.join(lemmas)                                
+                                                            
 
 def clean_text(text: str) -> str:
     """Clean and preprocess text."""
@@ -55,6 +81,9 @@ def clean_text(text: str) -> str:
     
     # Remove standalone numbers
     text = re.sub(r'\b\d+\b', '', text)
+    
+    # Lemmatization
+    text = lemmatize_text(text) 
     
     return text
 

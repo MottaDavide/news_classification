@@ -1,0 +1,318 @@
+
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage{booktabs}
+\usepackage[caption=true,font=footnotesize]{subfig}
+\usepackage{listings}
+\usepackage{multirow}
+
+\NewDocumentCommand{\codeword}{v}{%
+\texttt{\textcolor{black}{#1}}%
+}
+
+\begin{document}
+
+\title{News Article Classification Using TF-IDF and Context Injection}
+
+\author{\IEEEauthorblockN{Davide Motta}
+\IEEEauthorblockA{\textit{Politecnico di Torino} \\
+Student id: s352816 \\
+davide.motta@studenti.polito.it}
+}
+
+\maketitle
+
+\begin{abstract}
+In this report, we present a machine learning pipeline for automatic news article classification into seven predefined categories. 
+The proposed approach combines TF-IDF text vectorization with a novel context injection technique that embeds metadata directly into the text representation. 
+A LinearSVC classifier with balanced class weights achieves strong performance on the multi-class classification task. 
+The pipeline includes comprehensive preprocessing, feature engineering from both textual and numerical attributes, and hyperparameter tuning via grid search. 
+Results demonstrate that context injection is an effective strategy, outperforming traditional naive text vectorization methods.
+\end{abstract}
+
+\section{Problem Overview}
+
+The task involves classifying English-language news articles into seven categories: International News (0), Business (1), Technology (2), Entertainment (3), Sports (4), General News (5), and Health (6). 
+The dataset is divided into two parts:
+\begin{itemize}
+    \item \emph{Development set}: $\sim$ 80,000 labeled records for training and validation.
+    \item \emph{Evaluation set}: 20,000 unlabeled records for final evaluation.
+\end{itemize}
+
+An investigation of the development set revealed several data quality issues and challenges that make the news classification task non-trivial.
+First of all, as depicted in Figure \ref{fig:class_distribution} the categories are imbalanced, with \textit{International News} being the most frequent class by a large margin. Furthermore, some categories share vocabulary (like General News and International News), making the distinction even harder. Another problem arises by inspecting the \textit{article} field: there are URLs, HTML artifacts and odd characters that need to be thoroughly cleaned before the model training. Last, the \textit{timestamp} field contains more than 27,000 NaN values. Fortunately, these missing values are distributed proportionally across categories, simplifying their treatment.
+
+
+ By investigating the textual a metadata fields we discovered patterns that could be very discriminative: \textit{page\_rank}, \textit{source}, and \textit{article} fields contain effective signals for classification. For instance, the \textit{Technology} category is the only one having a significant amount of \textit{page\_rank} records different from $5$ (Figure \ref{fig:page_rank}), and it contains very long articles compared to the other categories (Figure \ref{fig:article_len}). Moving forward, certain sources  are exclusive to specific categories: as shown in Figure~\ref{fig:top_sources}, ``Syfy.com'' publishes only \textit{Entertainment} articles, providing perfect classification for those records. 
+ 
+ Another meaningful pattern emerges from URLs within articles. We found 15.5\% of articles with at least one URLs. Of these, 58.1\% (i.e. 9\% of the total dataset) includes the \codeword{/rss/[category]} web feeds. These feeds exhibit a perfect correlation with the target labels as shown in Table \ref{tab:rss}.
+
+ While these information appear highly useful, two concerns must be addressed:
+
+ \begin{itemize}
+    \item \textit{Temporal drift}: The dataset contains articles published between 2004 and 2008. Models may learn era-specific patterns (e.g., source distributions, topic prevalence) that do not generalize to contemporary news.
+    \item \textit{Shortcut learning}: Highly discriminative metadata features may cause the model to rely on surface-level correlations rather than learning semantic patterns from the text, harming generalization when such metadata is unavailable.
+ \end{itemize}
+
+\begin{figure}
+    \centering
+    \includegraphics[width=0.4\textwidth]{category_distribution.pdf}
+    \caption{Category distribution}
+    \label{fig:class_distribution}
+\end{figure}
+
+\begin{figure}[htp]
+    \centering
+    \subfloat[Length Distribution\label{fig:article_len}]{\includegraphics[width=7cm]{article_len.pdf}}\par
+    \vspace{0.5cm}
+    \subfloat[Page Rank Distribution\label{fig:page_rank}]{\includegraphics[width=7cm]{page_rank_distribution.pdf}}\par
+    \vspace{0.5cm}
+    \subfloat[Top Sources Distribution\label{fig:top_sources}]{\includegraphics[width=7cm]{top_sources.pdf}}
+
+    \caption{Features analysis}
+    \label{fig:combined_features}
+\end{figure}
+
+\begin{table}
+\centering
+\begin{tabular}{ |l|c| }
+    \toprule
+    \textbf{RSS (100\% accuracy)} & \textbf{Category} \\ \midrule
+     \codeword{/europe /politics /world} & International \\
+     \codeword{/entertainment} & Entertainment \\
+     \codeword{/sports} & Sports \\ 
+     \codeword{/business} & Business \\
+     \codeword{/tech} \codeword{/science} & Technology \\
+     \codeword{/health} & Health \\
+     \codeword{/cnn_topstories} & General \\
+    \bottomrule
+\end{tabular}
+    \caption{RSS feeds ($9\%$) fully classify the articles }
+    \label{tab:rss}
+\end{table}
+
+
+
+\section{Proposed Approach}
+
+\subsection{Data Preprocessing}
+
+The preprocessing pipeline addresses data quality issues in several steps:
+
+\textit{Duplicate removal}: The dataset contains exact duplicates (same source, title, article, and label) and near-duplicates (same content from different sources). We removed these by keeping the most recent instance based on timestamp.
+
+\textit{Ambiguous sample removal}: Some articles appear with identical text but different labels, indicating annotation inconsistencies. These samples are removed to prevent contradictory training signals.
+
+\textit{Text cleaning}: Raw text undergoes extensive cleaning:
+\begin{itemize}
+    \item HTML entities, URLs and tags removal
+    \item Special character removal (keeping only alphabetic characters)
+    \item Stopword removal (common English words plus domain-specific terms like ``said'', ``says'', ``year'')
+    \item Lowercase conversion
+    \item Lemmatization
+\end{itemize}
+
+Eventually, we dropped the \textit{Id} columns since it brings no information.
+
+\subsection{Feature Engineering}
+While there are only few fields in the dataset, it is possible to extrapolate effective signals from them. Here the main features we extracted:
+\begin{itemize}
+    \item \textit{RSS category}: the RSS web feeds category extracted from articles (e.g \codeword{politics}). A complete picture of the categories is shown Table \ref{tab:rss}.
+    \item \textit{Title suffix}: some titles contain extra label that categorize the articles (Table \ref{tab:suffix}).
+    \item \textit{Article length}: the binned number of words inside each article (after cleaning). We created four category: long, medium, short, very short.
+    \item \textit{Link counts}: The total count of links, images, ads, and feeds.
+    \item \textit{Cyclic time features}: timestamp is encoded as cyclic features using sine/cosine for hour, day of week and month \cite{sklearn_cyclical_features}. We decided not to include the year since the dataset contains a dated and limited time range.
+\end{itemize}
+
+
+\begin{table}
+\centering
+\begin{tabular}{|p{3cm} | c | c|}
+\toprule
+\textbf{Title} & \textbf{Suffix} & \textbf{Category} \\
+\midrule
+\emph{NEC Shoots to Regain Supercomputer Title (PC World)} & PC World & Technology  \\
+\bottomrule
+\end{tabular}
+\caption{Suffix example (PC World is only Technology)}
+\label{tab:suffix}
+\end{table}
+
+
+\subsection{Data Pipeline}
+After the features generation we built the pipeline by applying several techniques.
+
+\textit{Context Injection}: A key contribution is the context injection technique, where metadata is embedded directly into the text before vectorization. The source name and RSS category (extracted from URLs) are repeated multiple times and prepended to the article text:
+
+\begin{equation}
+\text{combined\_text} = \text{source}_{\times 3} \oplus \text{rss}_{\times 5} \oplus \text{title}_{\times 2} \oplus \text{article}
+\end{equation}
+
+where $\oplus$ denotes string concatenation. This allows the TF-IDF vectorizer to capture interactions between metadata tokens and content words within a unified bag-of-words representation.
+
+\textit{TF-IDF Vectorization}: The primary features come from TF-IDF vectorization \cite{salton1988term} of the combined text. Key parameters include:
+\begin{itemize}
+    \item Maximum 10,000 features
+    \item N-gram range: unigrams, bigrams, and trigrams (1-2)
+    \item Minimum document frequency: 5
+    \item Maximum document frequency: 70\%
+    \item Sublinear TF scaling
+\end{itemize}
+
+\textit{$\chi^2$ Features Selection}
+To reduce the dimensionality of the TF-IDF feature space while retaining the most informative terms, we applied the chi-squared ($\chi^2
+$) statistical test for feature selection \cite{forman2003extensive}. This method evaluates the dependence between each term and the target class. Terms with higher $\chi^2$ scores exhibit stronger associations with specific categories.
+
+
+
+
+\textit{CatBoost Encoding}: Categorical features (\textit{source}, \textit{first\_link\_domain}, \textit{title\_suffix}, \textit{rss\_label}) are encoded using CatBoost target encoding \cite{prokhorenkova2018catboost}. For each categorical variable $x$ and class $c$, the encoder computes:
+
+\begin{equation}
+\text{enc}(x, c) = \frac{\text{count}(x, c) + \sigma \cdot \text{prior}(c)}{\text{count}(x) + \sigma}
+\end{equation}
+
+
+where $\sigma = 0.9$ is a smoothing parameter that prevents overfitting on rare categories. This produces 28 features (4 categorical columns $\times$ 7 classes), capturing the conditional probability of each class given the categorical value while avoiding data leakage.
+
+
+
+
+
+\subsection{Model Selection}
+
+We evaluated three model families, each with different characteristics and trade-offs. The primary evaluation metric was Macro $F_1$ score, which is particularly suitable for multi-class problems with imbalanced class distributions as it gives equal weight to each class regardless of its frequency \cite{sokolova2009systematic}.
+
+\begin{itemize}
+\item \textit{LinearSVC}: Support Vector Machines with linear kernels have been extensively studied for text classification and consistently achieve state-of-the-art performance \cite{joachims1998text}. In text classification, the number of features (vocabulary terms) often exceeds the number of training samples, a regime where linear models tend to generalize well. Furthermore, the $L_2$ regularization inherent in SVMs helps prevent overfitting on noisy features. 
+
+\item \textit{LightGBM}: Gradient Boosting Decision Trees (GBDT) have shown remarkable performance on structured/tabular data \cite{ke2017lightgbm}. LightGBM, in particular, offers efficient handling of categorical features and fast training times. We included this model to assess whether the combination of textual (TF-IDF) and metadata features (numerical and categorical) could benefit from a non-linear model. However, this model seems to suffer overfitting while keeping comparable performance to LinearSVC on test set.
+
+\item \textit{Logistic Regression}: Multinomial Logistic Regression using the softmax function is a well-established baseline for multi-class classification \cite{hosmer2013applied}. With $L_2$ regularization and the L-BFGS optimizer, it provides a probabilistic interpretation of predictions and serves as a computationally efficient baseline. While highly interpretable, preliminary experiments showed consistently lower performance compared to LinearSVC, leading us to exclude it from detailed hyperparameter tuning.
+\end{itemize}
+
+
+
+\subsection{Hyperparameter Tuning}
+
+The proposed pipeline involves numerous hyperparameters spanning both preprocessing and model configuration. Performing a joint grid search over all parameters would be computationally prohibitive. Following a similar approach to \cite{giobergia2024dslab}, we adopted a two-stage tuning strategy based on the assumption that preprocessing and model hyperparameters are approximately orthogonal—that is, the optimal preprocessing configuration does not strongly depend on the specific model hyperparameters, and vice versa.
+
+\subsubsection{Preprocessing Configuration}
+
+We fixed the model hyperparameters to their default values and systematically explored the preprocessing configuration space. We considered the following preprocessing hyperparameters:
+
+\begin{itemize}
+    \item \textit{Context injection}: We evaluated both its presence/absence and the repetition weights for each metadata field. Higher weights increase the influence of metadata in the final representation.
+    
+    \item \textit{TF-IDF parameters}: We explored different vocabulary sizes, n-gram ranges, and the effect of sublinear term frequency scaling, which dampens the impact of very frequent terms.
+    
+    \item \textit{CatBoost encoding}: We evaluated its presence/absence and the smoothing parameter $\sigma$, which controls the regularization strength.
+    
+    \item \textit{Chi-squared feature selection}: We evaluated its presence/absence and the different values of $k$ (number of features to keep).
+\end{itemize}
+
+To reduce the search space, we made the simplifying assumption that each preprocessing component can be evaluated semi-independently. We first established a baseline using only TF-IDF features, then incrementally added components and measured their impact. This approach, while not exhaustive, allowed us to efficiently explore the configuration space.
+
+
+\subsubsection{Model Hyperparameter Tuning}
+
+After fixing the preprocessing configuration, we proceeded to tune model-specific hyperparameters. We employed 5-fold stratified cross-validation on 80/20 train-test split.
+
+\textit{LinearSVC} was tuned via exhaustive Grid Search over the main hyperparameters listed in Table.
+
+\textit{LightGBM} was tuned via Randomized Search with 40 iterations, as the hyperparameter space is larger and exhaustive search would be computationally prohibitive. Key parameters include the number of estimators (trees), maximum tree depth,  and learning rate.
+
+Table \ref{tab:hyper} summarizes the searching space of hyperparameters.
+
+\begin{table}
+\centering
+\begin{tabular}{|c| c |c|}
+\toprule
+\textbf{Model} & \textbf{Params} & \textbf{Values} \\
+\midrule
+\multirow{ 2}{*}{Context Inj.}   & weights & $[1,5]$ \\ & presence & $\{T, F\}$ \\ \hline
+\multirow{ 3}{*}{TF-IDF} & max features & $\{10000, 15000, 20000\}$ \\ & sublinear & $\{T, F\}$ \\ & n-grams & $\{(1,2), (1,3)\}$ \\ \hline
+\multirow{ 2}{*}{CatBoost} & sigma &  $\{0, 0.5, 0.9, 1\}$ \\ 
+& presence & $\{T, F\}$  \\ \hline
+\multirow{ 2}{*}{$\chi^2$} & k &  $\{5000, 10000\}$ \\ 
+& presence & $\{T, F\}$  \\ \hline
+\multirow{ 3}{*}{LSVC} & C &  $\{0.01, 0.02, 0.05, 0.1, 0.2\}$ \\ & maxiter &  $\{2000, 1000, 3000\}$ \\ & dual & $\{T, F\}$  \\ \hline
+\multirow{ 7}{*}{LGBM} & n estimators & $\{100, 200, 300, 500\}$ \\
+        & max depth & $\{5, 7, 10, 15, -1\}$ \\
+        & learning rate & $\{0.01, 0.05, 0.1, 0.2\}$ \\
+        & num leaves & $\{31, 50, 70, 100\}$ \\
+        & min child samples & $\{20, 50, 100\}$ \\
+        & subsample & $\{0.7, 0.8, 1.0\}$ \\
+        & colsample bytree & $\{0.7, 0.8, 1.0\}$ \\
+
+\bottomrule
+\end{tabular}
+\caption{Hyperparameters space} 
+\label{tab:hyper}
+\end{table}
+
+\section{Results}
+The tuning of the preprocessing parameters proved the presence of both Context Injection and CatBoost Encoding  significantly enhance the baseline, while the usage of $\chi^2$ feature selection shows relevant improvement for LightGBM only. In Figure \ref{tab:ablation} the contributions calculated throughout ablation test. Furthemore we found the optimal weights for source, rss, title, article to be, 3,5,2,1 respectively. For TF-IDF \emph{max features=15,000} and \emph{sublinear=True} with \emph{n-grams=(1,3)}. Catboost exhibited a \emph{sigma=0.9} while \emph{k=10,000} for $\chi^2$.
+
+The best configuration for LinearSVC was found with \emph{C=0.05} and \emph{dual=False} with \emph{maxiter=2000} (Macro $F_1 \approx 0.726$) whereas the best configuration for the LightGBM was found for \emph{n\_estimators=500} \emph{max\_depth=7} \emph{learning\_rate=0.05}
+                \emph{num\_leaves=31} \emph{min\_child\_samples=50}, \emph{subsample=0.7}, and
+                \emph{colsample\_bytree=0.6} (Macro $F_1 \approx 0.727$)
+
+We trained the best performing LSVC and
+LGBM on all available development data. Then the models have
+been used to label the evaluation set. The public score obtained
+is of 0.725 for the SVC and of 0.722 for the LGBM. It is worth noticing that LightGBM model seems to suffer of overfitting (Train Macro $F_1 > 0.82$) and this could explain the worse performance on evaluation set with respect to LinearSVC.
+
+Analyzing each category locally, we noticed both models are struggling in labelling General News and Enterteinment articles ($F_1 < 0.6$). Usually, Internationl News was predicted insted of those.
+
+
+
+\begin{table}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\multirow{2}{*}{\textbf{Component}} & \multicolumn{2}{c}{\textbf{Macro $F_1 \approx$}} \\
+\cmidrule(lr){2-3}
+& LSVC & LGBM \\
+\midrule
+Base TF-IDF & 0.66 & 0.65 \\
+\midrule
++ Context Inj. & 0.72 & 0.71 \\ 
++ Catboost & \textbf{0.73} & 0.72 \\ 
++ $\chi^2$ & 0.72 & \textbf{0.73} \\
+\bottomrule
+\end{tabular}
+\caption{Ablation Test (on test set)} 
+\label{tab:ablation}
+\end{table}
+    
+
+
+
+\section{Discussion}
+
+The proposed approach achieves satisfactory results on the news article classification task. The ablation study demonstrates that context injection is the most impactful contribution, improving the baseline TF-IDF performance by approximately 6 percentage points. This technique effectively bridges the gap between metadata and textual content by allowing the vectorizer to capture joint patterns.
+
+We have empirically shown that LinearSVC and LightGBM perform similarly on this task, though LinearSVC exhibits better generalization as evidenced by the smaller train-test gap. The overfitting observed in LightGBM (training Macro $F_1 > 0.82$ vs. test $\approx 0.72$) suggests that gradient boosting models may be prone to memorizing spurious correlations in high-dimensional sparse feature spaces.
+
+The following aspects might be worth considering to further improve the obtained results:
+
+\begin{itemize}
+    \item \textit{Advanced text representations}: Pre-trained language models such as BERT \cite{devlin2019bert} or sentence transformers could capture semantic relationships that TF-IDF cannot. However, the computational cost and the age of the dataset (2004--2008) may limit their effectiveness.
+    
+    \item \textit{Ensemble methods}: Combining LinearSVC and LightGBM predictions through voting or stacking could leverage their complementary strengths---LinearSVC's robustness on sparse text features and LightGBM's ability to model non-linear interactions among metadata features.
+    
+    \item \textit{Class-specific analysis}: A detailed per-class error analysis could reveal systematic misclassifications. For instance, distinguishing between \textit{General News} and \textit{International News} remains challenging due to vocabulary overlap, and targeted feature engineering for these classes could yield improvements.
+\end{itemize}
+
+Despite these potential improvements, the results obtained are already competitive. The main limitation lies in the strong dependence on metadata features, which raises concerns about generalization to news sources not present in the training data. Nevertheless, for the specific task at hand---where such metadata is consistently available---the proposed pipeline offers an effective and interpretable solution.
+
+\bibliography{bibliography}
+\bibliographystyle{ieeetr}
+
+\end{document}

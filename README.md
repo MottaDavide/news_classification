@@ -99,8 +99,8 @@ All configuration options are defined in `config/config.yaml`:
 |-----------|------|---------|-------------|
 | `RANDOM_STATE` | int | `42` | Random seed for reproducibility |
 | `CONTEXT_INJECTION` | bool | `True` | Inject metadata (source, domain) into text features |
-| `USE_CATBOOST` | bool | `False` | Use CatBoost encoding for categorical features |
-| `TUNING` | bool | `True` | Enable hyperparameter tuning via GridSearch/RandomSearch |
+| `USE_CATBOOST` | bool | `True` | Use CatBoost encoding for categorical features |
+| `TUNING` | bool | `False` | Enable hyperparameter tuning via GridSearch/RandomSearch |
 
 ### Label Configuration
 
@@ -194,7 +194,7 @@ submission = train_full_and_predict(
     eval_df,
     model_type='svc',
     model=model,
-    pipeline=pipeline,
+    pipeline=None,
     context_injection=CONTEXT_INJECTION,
     use_catboost=USE_CATBOOST,
     submission_path='submission.csv'
@@ -203,19 +203,5 @@ submission = train_full_and_predict(
 
 This will create a `submission.csv` file with predictions.
 
-## Features
-
-The pipeline extracts the following features:
-
-1. **TF-IDF Features**: Vectorized text from title, description, and body
-2. **Numerical Features**: `page_rank`, `n_links`, `n_images`, `n_ads`, `n_feeds`, `article_length`
-3. **Categorical Features** (with CatBoost encoding): `source`, `first_link_domain`, `title_suffix`, `rss_label`
-4. **Cyclic Time Features**: Hour, day of week, and month encoded as sin/cos pairs
-
-## Output
-
-The pipeline outputs:
-- **Evaluation metrics**: Accuracy, Macro F1, Weighted F1, per-class precision/recall/F1
-- **Confusion matrix**: Both normalized and absolute counts
-- **Feature importance plots**: Top features per class (SVC) or global importance (LightGBM)
-- **Saved models**: Classifier, pipeline, and parameters in `models/` directory
+## Report
+The `report` folder contains the technical report. Please open `main.pdf`.

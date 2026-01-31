@@ -27,7 +27,9 @@ RANDOM_STATE: 42
 
 CONTEXT_INJECTION: True
 
-USE_CATBOOST: False
+USE_CATBOOST: True
+
+USE_CHI2: False
 
 TUNING: False
 
@@ -43,5 +45,8 @@ TFIDF_PARMAS:
 
 CATBOOST_PARAMS:
   'sigma': 0.9
+
+CHI2_PARAMS:
+  'chi2_k': 10000
 
 

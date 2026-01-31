@@ -1,0 +1,13 @@
+\begin{thebibliography}{1}
+
+\bibitem{salton1988term}
+G.~Salton and C.~Buckley, ``Term-weighting approaches in automatic text
+  retrieval,'' {\em Information processing \& management}, vol.~24, no.~5,
+  pp.~513--523, 1988.
+
+\bibitem{joachims1998text}
+T.~Joachims, ``Text categorization with support vector machines: Learning with
+  many relevant features,'' in {\em European conference on machine learning},
+  pp.~137--142, Springer, 1998.
+
+\end{thebibliography}

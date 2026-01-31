@@ -24,9 +24,7 @@ with open('config/config.yaml', 'r') as f:
     
 
 
-LABEL_NAMES = config['LABEL_NAMES']
 
-RSS_TO_LABEL = config['RSS_TO_LABEL']
 
 RANDOM_STATE = config['RANDOM_STATE']
 
